@@ -2,39 +2,140 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Demo Chat Hub</title>
+    <title>Secure Chat Hub</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 30px; background: #e5ddd5; }
-        .container { max-width: 500px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        #chat-box { height: 300px; border: 1px solid #ddd; background: #f0f0f0; overflow-y: auto; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
-        .input-group { display: flex; margin-bottom: 10px; gap: 10px; }
-        input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
-        button { padding: 10px 20px; background: #075e54; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #128c7e; }
-        .system-msg { color: #555; font-style: italic; text-align: center; margin: 5px 0; font-size: 13px; }
-        .msg { margin: 8px 0; padding: 8px 12px; border-radius: 6px; max-width: 80%; width: fit-content; }
-        .msg-inbound { background: #fff; align-self: flex-start; border: 1px solid #e0e0e0; }
-        .msg-outbound { background: #dcf8c6; margin-left: auto; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 25px;
+            border: 2px solid #000000;
+            border-radius: 2px;
+        }
+
+        h2 {
+            font-size: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 0;
+            border-bottom: 2px solid #000000;
+            padding-bottom: 10px;
+            color: #000000;
+        }
+
+        #chat-box {
+            height: 320px;
+            border: 2px solid #000000;
+            background: #fafafa;
+            overflow-y: auto;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 0px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .input-group {
+            display: flex;
+            margin-bottom: 12px;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            background: #ffffff;
+            border: 2px solid #000000;
+            color: #000000;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        input:focus {
+            outline: none;
+            background: #f5f5f5;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #000000;
+            color: #ffffff;
+            border: 2px solid #000000;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+            transition: all 0.15s ease;
+        }
+
+        button:hover {
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .system-msg {
+            color: #666666;
+            text-align: center;
+            margin: 8px 0;
+            font-size: 13px;
+            border-top: 1px dashed #000000;
+            border-bottom: 1px dashed #000000;
+            padding: 4px 0;
+            font-style: italic;
+        }
+
+        .msg {
+            margin: 6px 0;
+            padding: 10px 14px;
+            max-width: 80%;
+            width: fit-content;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        /* High-Contrast Message Blocks */
+        .msg-inbound {
+            background: #ffffff;
+            color: #000000;
+            border: 2px solid #000000;
+            align-self: flex-start;
+        }
+
+        .msg-outbound {
+            background: #000000;
+            color: #ffffff;
+            margin-left: auto;
+            align-self: flex-end;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>WhatsApp Demo: Step 1</h2>
+    <h2>ChatApp Demo: Step 1</h2>
 
     <div class="input-group">
-        <input type="text" id="username" placeholder="Your username (e.g., Alice)">
+        <input type="text" id="username" placeholder="Your username (e.g., Alpha)">
         <button onclick="connectToServer()">Sign In</button>
     </div>
-
-    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
 
     <div id="chat-box">
         <div class="system-msg">Please sign in to start chatting.</div>
     </div>
 
     <div class="input-group">
-        <input type="text" id="targetUser" placeholder="Recipient's username (e.g., Bob)">
+        <input type="text" id="targetUser" placeholder="Recipient's username (e.g., Bravo)">
     </div>
     <div class="input-group">
         <input type="text" id="messageText" placeholder="Type your message here...">
@@ -46,20 +147,24 @@
     let socket = null;
     let myUsername = "";
 
-    function connectToServer() {
+    async function connectToServer() {
         myUsername = document.getElementById("username").value.trim();
         if (!myUsername) return alert("Please enter a username!");
 
-        // Connect to your running Java Javalin server
+        const sharedSecret = "secret-key-hardcoded";
+        await generateSecureKey(sharedSecret);
+
         socket = new WebSocket(`ws://localhost:7070/chat/${myUsername}`);
 
         socket.onopen = () => {
             logSystemMessage(`Connected as <b>${myUsername}</b>`);
         };
 
-        socket.onmessage = (event) => {
+        socket.onmessage = async (event) => {
             const data = JSON.parse(event.data);
-            logIncomingMessage(data.sender, data.message);
+
+            const decryptedText = await decryptMessage(data.message,data.iv);
+            logIncomingMessage(data.sender, decryptedText);
         };
 
         socket.onclose = () => {
@@ -67,20 +172,22 @@
         };
     }
 
-    function sendMessage() {
+    async function sendMessage() {
         const target = document.getElementById("targetUser").value.trim();
         const message = document.getElementById("messageText").value.trim();
 
         if (!socket || socket.readyState !== WebSocket.OPEN) return alert("Connect to server first!");
         if (!target || !message) return alert("Fill in recipient and message details!");
 
+        const encryptedData = await encryptMessage(message);
+        if(!encryptedData) return;
+
         const packet = {
             sender: myUsername,
             target: target,
-            message: message
+            message: encryptedData.ciphertext,iv:encryptedData.iv
         };
 
-        // Convert JSON object to a string and send over WebSocket pipeline
         socket.send(JSON.stringify(packet));
 
         logOutgoingMessage(target, message);
@@ -103,6 +210,79 @@
         const box = document.getElementById("chat-box");
         box.innerHTML += `<div class="msg msg-outbound"><b>You (to ${target}):</b> ${msg}</div>`;
         box.scrollTop = box.scrollHeight;
+    }
+    let cryptokey = null;
+    async function generateSecureKey(rawPassword){
+        const encoder = new TextEncoder();
+        const passwordBytes = encoder.encode(rawPassword);
+
+        const hash = await window.crypto.subtle.digest('SHA-256',passwordBytes);
+
+        cryptokey = await  window.crypto.subtle.importKey(
+            "raw",hash,{
+                name:"AES-GCM"
+            },false,["encrypt","decrypt"]
+        );
+        console.log("System: Cryptographic key sucessfully initalized");
+    }
+    async function encryptMessage(plainText){
+        if(!cryptokey){
+            alert("cryptographic key not initialized");
+            return null;
+        }
+        const encoder = new TextEncoder();
+        const dataBytes = encoder.encode(plainText);
+
+        //generating a unique,random 12bytes initialization vector iv
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+        //encrypting the raw bytes using AES-GCM
+        const encryptedBuffer = await window.crypto.subtle.encrypt(
+            {
+                name: "AES-GCM",
+                iv: iv //passing random IV container
+            },
+            cryptokey,
+            dataBytes
+        );
+        // Convert the binary encrypted data and IV into Base64 strings
+        // (Networks handle standard strings much better than raw binary buffers)
+        const encryptedBytes = new Uint8Array(encryptedBuffer);
+        const base64Ciphertext = btoa(String.fromCharCode(...encryptedBytes));
+        const base64Iv = btoa(String.fromCharCode(...iv));
+
+        return {
+            ciphertext: base64Ciphertext,
+            iv: base64Iv
+        };
+
+    }
+
+    async function decryptMessage(ciphertextBase64,ivBase64){
+        if (!cryptokey) {
+            console.error("Cryptographic key not initialized!");
+            return "[Error: Unable to decrypt]";
+        }
+        try {
+            const encryptedBytes = new Uint8Array(atob(ciphertextBase64).split("").map(c => c.charCodeAt(0)));
+            const ivBytes = new Uint8Array(atob(ivBase64).split("").map(c => c.charCodeAt(0)));
+
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: ivBytes
+                },
+                cryptokey,
+                encryptedBytes
+            );
+
+            const decoder = new TextDecoder();
+            return decoder.decode(decryptedBuffer);
+        } catch (e) {
+            console.error("Decryption failed:", e);
+            return "[Decryption Error: Key mismatch or tampered data]";
+        }
+
     }
 </script>
 </body>
