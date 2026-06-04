@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -39,7 +40,7 @@
             overflow-y: auto;
             padding: 15px;
             margin-bottom: 15px;
-            border-radius: 0px;
+            border-radius: 0;
             display: flex;
             flex-direction: column;
         }
@@ -118,24 +119,57 @@
             margin-left: auto;
             align-self: flex-end;
         }
+        .video-container{
+            display: none;
+
+            grid-template-columns:1fr 1fr ;
+            gap: 10px;
+            margin-bottom: 15px;
+
+        }
+        .video-container.active{
+            display: grid;
+        }
+        video{
+            width: 100%;
+            height: 140px;
+            background: #000000;
+            border: 2px solid #000000;
+            object-fit: cover;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>ChatApp Demo: Step 1</h2>
+    <h2>ChatApp</h2>
 
     <div class="input-group">
         <input type="text" id="username" placeholder="Your username (e.g., Alpha)">
         <button onclick="connectToServer()">Sign In</button>
     </div>
+    <div class="video-container" id="videoArea">
 
+        <div>
+            <label>Local Stream</label>
+            <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+        <div>
+            <label>Remote Feed</label>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+
+        <div style="grid-column: span 2;text-align: center;margin-top: 10px;">
+            <button onclick="terminateActiveCall()" style="background: red;color:white;border-color: black;width: 100% ">end Transmission</button>
+        </div>
+    </div>
     <div id="chat-box">
         <div class="system-msg">Please sign in to start chatting.</div>
     </div>
 
     <div class="input-group">
         <input type="text" id="targetUser" placeholder="Recipient's username (e.g., Bravo)">
+        <button onclick="initiateCallRequest()" style="background: #ffffff;color: #000000">Call</button>
     </div>
     <div class="input-group">
         <input type="text" id="messageText" placeholder="Type your message here...">
@@ -143,10 +177,36 @@
     </div>
 </div>
 
+<div id="outgoingCallModel" style="display: none;position: fixed;top:0;left: 0;width: 100%;height: 100%;background: rgba(255,255,255,0.9);z-index: 1000;align-items: center;justify-content: center;flex-direction: column;border: 2px solid #000;">
+    <h3 style="text-transform: uppercase;letter-spacing: 1px;">Select Connection types</h3>
+    <div class="input-group" style="justify-content: center">
+    <button onclick="executeMediaDial('video')">Video Call</button>
+        <button onclick="executeMediaDial('audio')" style="background: #fff;color: #000;">Voice only</button>
+        <button onclick="closeModal('outgoingCallModal')" style="background: red;color: #fff;border-color: red">Cancel
+
+        </button>
+
+
+    </div>
+
+</div>
+<div id="incomingCallModal" style="display: none;position: fixed;top:0;left:0;width: 100%;height: 100%;background: rgba(255,255,255,0.9);z-index: 1000;align-items: center;justify-content: center;flex-direction: column;border: 2px solid #000">
+    <h3 style="text-transform: uppercase;letter-spacing: 1px" id="calleridentityLabel">Incoming Call...</h3>
+    <div class="input-group" style="justify-content: center;">
+        <button onclick="acceptIncomingCall()">Accept</button>
+        <button onclick="declineIncomingCall()" style="background: red;color: #fff;border-color: red">Decline</button>
+    </div>
+
+</div>
+
 <script>
     let socket = null;
     let myUsername = "";
+    let peer = null; //for storing our WebRtc orchestration engine instance
+    let localStream = null; //will store our raw camera/microphopne data stream
 
+    let activeCallObject = null; //hold the active peerKs call instance
+    let pendingIncomingCall = null; //temporarily holds the call while ringing
     async function connectToServer() {
         myUsername = document.getElementById("username").value.trim();
         if (!myUsername) return alert("Please enter a username!");
@@ -158,6 +218,9 @@
 
         socket.onopen = () => {
             logSystemMessage(`Connected as <b>${myUsername}</b>`);
+            peer = new Peer(myUsername);
+
+            setupIncomingCallListener();
         };
 
         socket.onmessage = async (event) => {
@@ -283,6 +346,69 @@
             return "[Decryption Error: Key mismatch or tampered data]";
         }
 
+    }
+
+    function initiateCallRequest(){
+        const target = document.getElementById("targetUser").value.trim();
+        if(!target) return alert ("Enter recipient's username before calling!");
+
+        logSystemMessage(`dialing the user [${target}]....`);
+
+        navigator.mediaDevices.getUserMedia({video:true,audio:true}).then((stream)=>{
+            localStream = stream;
+
+            // displaying our local feed
+            document.getElementById("localVideo").srcObject = stream;
+
+            const call = peer.call(target,localStream);
+
+            if(call){
+                call.on('stream',(remoteStream)=>{
+                    document.getElementById("videoArea").classList.add("active");
+                    document.getElementById("remoteVideo").srcObject = remoteStream;
+                });
+            }
+            else{
+                logSystemMessage("System error: handshake routing failed.")
+            }
+        })
+            .catch((err)=>{
+                alert("failed to access camera/microphone");
+                console.error(err);
+            })
+    }
+    function setupIncomingCallListener(){
+        peer.on('call',(incomingCall)=>{
+            //popup for asking the consent from the receiver
+            const acceptCall = confirm(`incoming video call from ${incomingCall.peer}, Accept ?`)
+            if(acceptCall){
+                logSystemMessage("media handshake accepted. initializing local feed...");
+                //capture receiver's feed and transmit it back to the caller
+
+                navigator.mediaDevices.getUserMedia({video:true,audio:true}).then((stream)=>{
+                    localStream = stream;
+
+                    //unhide the video layout
+
+                    document.getElementById("videoArea").classList.add("active");
+                    document.getElementById("localVideo").srcObject = stream;
+
+                    //answer the link and transmit our stream back to the caller
+                    incomingCall.answer(localStream);
+
+                    //hook into alpha's streaming data payload when it lands
+
+                    incomingCall.on('stream',(remoteStream) =>{
+                        document.getElementById("remoteVideo").srcObject = remoteStream
+                    });
+                })
+                    .catch((err) =>{
+                        alert("could not initalize local media device for the call");
+                    })
+            }else{
+                logSystemMessage("incoming call request denied")
+            }
+        })
     }
 </script>
 </body>
