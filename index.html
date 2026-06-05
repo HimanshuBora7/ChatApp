@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Secure Chat Hub</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
 
         body {
@@ -158,11 +159,11 @@
             <label>Remote Feed</label>
             <video id="remoteVideo" autoplay playsinline></video>
         </div>
-
-        <div style="grid-column: span 2;text-align: center;margin-top: 10px;">
-            <button onclick="terminateActiveCall()" style="background: red;color:white;border-color: black;width: 100% ">end Transmission</button>
-        </div>
     </div>
+    <div id="callControls" style="display: none;text-align: center;margin-bottom: 15px;">
+        <button onclick="terminateActiveCall()" style="background: red;color: white;border-color: black;width: 100%;">End transmission</button>
+    </div>
+
     <div id="chat-box">
         <div class="system-msg">Please sign in to start chatting.</div>
     </div>
@@ -177,7 +178,7 @@
     </div>
 </div>
 
-<div id="outgoingCallModel" style="display: none;position: fixed;top:0;left: 0;width: 100%;height: 100%;background: rgba(255,255,255,0.9);z-index: 1000;align-items: center;justify-content: center;flex-direction: column;border: 2px solid #000;">
+<div id="outgoingCallModal" style="display: none;position: fixed;top:0;left: 0;width: 100%;height: 100%;background: rgba(255,255,255,0.9);z-index: 1000;align-items: center;justify-content: center;flex-direction: column;border: 2px solid #000;">
     <h3 style="text-transform: uppercase;letter-spacing: 1px;">Select Connection types</h3>
     <div class="input-group" style="justify-content: center">
     <button onclick="executeMediaDial('video')">Video Call</button>
@@ -207,10 +208,15 @@
 
     let activeCallObject = null; //hold the active peerKs call instance
     let pendingIncomingCall = null; //temporarily holds the call while ringing
+    let currentCallType = "";// tracks if the incoming call is audio or video
+
+
     async function connectToServer() {
         myUsername = document.getElementById("username").value.trim();
         if (!myUsername) return alert("Please enter a username!");
 
+        document.querySelector("button[onclick='connectToServer()']").disabled = true;
+        document.getElementById("username").disabled =true;
         const sharedSecret = "secret-key-hardcoded";
         await generateSecureKey(sharedSecret);
 
@@ -352,63 +358,157 @@
         const target = document.getElementById("targetUser").value.trim();
         if(!target) return alert ("Enter recipient's username before calling!");
 
-        logSystemMessage(`dialing the user [${target}]....`);
+        openModal("outgoingCallModal");
 
-        navigator.mediaDevices.getUserMedia({video:true,audio:true}).then((stream)=>{
+
+    }
+    function executeMediaDial(type){
+        closeModal("outgoingCallModal");
+        const target = document.getElementById("targetUser").value.trim();
+        const mediaConstraints = {
+            audio: true,
+            video: (type === 'video')
+        };
+        logSystemMessage(`Dialing secure ${type} link to [${target}]....`);
+
+        navigator.mediaDevices.getUserMedia(mediaConstraints).then((stream)=>{
             localStream = stream;
-
-            // displaying our local feed
-            document.getElementById("localVideo").srcObject = stream;
-
-            const call = peer.call(target,localStream);
+            const call = peer.call(target,localStream,{metadata:{callType:type}});
 
             if(call){
-                call.on('stream',(remoteStream)=>{
-                    document.getElementById("videoArea").classList.add("active");
-                    document.getElementById("remoteVideo").srcObject = remoteStream;
-                });
+                activeCallObject =call;
+
+                if(type === 'video'){
+                    document.getElementById("localVideo").srcObject = stream;
+                }
+                activeCallObject.on('stream',(remoteStream)=>{
+                    document.getElementById("callControls").style.display = "block";
+                    if(type === 'video'){
+                        document.getElementById("videoArea").classList.add("active");
+                        document.getElementById("remoteVideo").srcObject = remoteStream;
+                    }
+                    else{
+                        logSystemMessage("voice link estb with peer node");
+                    }
+                })
+                //listen for when the Remote peer hangs up
+                activeCallObject.on('close',()=>{
+                    logSystemMessage("the remote peer terminated the transmission");
+                    cleanUpMediaStates();
+                })
             }
             else{
-                logSystemMessage("System error: handshake routing failed.")
+                logSystemMessage("system error: handshake routing failed")
             }
         })
             .catch((err)=>{
-                alert("failed to access camera/microphone");
+                alert("failed to access the hardware ")
                 console.error(err);
             })
     }
     function setupIncomingCallListener(){
-        peer.on('call',(incomingCall)=>{
-            //popup for asking the consent from the receiver
-            const acceptCall = confirm(`incoming video call from ${incomingCall.peer}, Accept ?`)
-            if(acceptCall){
-                logSystemMessage("media handshake accepted. initializing local feed...");
-                //capture receiver's feed and transmit it back to the caller
+    peer.on('call',(incomingCall)=>{
+        logSystemMessage(`inbound alert from ${incomingCall.peer}....`);
 
-                navigator.mediaDevices.getUserMedia({video:true,audio:true}).then((stream)=>{
-                    localStream = stream;
+        pendingIncomingCall = incomingCall;
+        currentCallType = incomingCall.metadata ? incomingCall.metadata.callType:'video';
 
-                    //unhide the video layout
+        document.getElementById("calleridentityLabel").innerHTML = `Incoming call from: <b>${incomingCall.peer}</b>`;
+        openModal("incomingCallModal")
+    })
+    }
+    function acceptIncomingCall() {
+        closeModal("incomingCallModal");
+        if (!pendingIncomingCall) return;
 
+        logSystemMessage("media handshake accepted. initialising local feed ");
+
+        const hardwareConstraints = {
+            audio: true,
+            video: (currentCallType === 'video')
+        }
+
+
+        //capture our local devices matching standard constraints
+        navigator.mediaDevices.getUserMedia(hardwareConstraints).then((stream) => {
+            localStream = stream;
+
+            //mapping our active call tracker globally
+            activeCallObject = pendingIncomingCall;
+            pendingIncomingCall = null;
+
+            activeCallObject.on('stream', (remoteStream) => {
+                logSystemMessage("direct media stream pipeline established successfully.")
+
+    document.getElementById("callControls").style.display = "block";
+                if (currentCallType === 'video') {
                     document.getElementById("videoArea").classList.add("active");
-                    document.getElementById("localVideo").srcObject = stream;
-
-                    //answer the link and transmit our stream back to the caller
-                    incomingCall.answer(localStream);
-
-                    //hook into alpha's streaming data payload when it lands
-
-                    incomingCall.on('stream',(remoteStream) =>{
-                        document.getElementById("remoteVideo").srcObject = remoteStream
-                    });
-                })
-                    .catch((err) =>{
-                        alert("could not initalize local media device for the call");
-                    })
-            }else{
-                logSystemMessage("incoming call request denied")
+                    document.getElementById("remoteVideo").srcObject = remoteStream;
+                } else {
+                    logSystemMessage("voice communication established (audio only)")
+                }
+            })
+            activeCallObject.on('close',()=>{
+                logSystemMessage("the transmission was terminated")
+                cleanUpMediaStates();
+            })
+            if (currentCallType === 'video') {
+                document.getElementById("localVideo").srcObject = stream;
             }
+            activeCallObject.answer(localStream);
         })
+            .catch((err) => {
+                alert("could not initialize local media devices");
+            });
+
+    }
+
+    function declineIncomingCall(){
+        closeModal("incomingCallModal");
+        if(!pendingIncomingCall) return;
+
+        logSystemMessage(("Incoming call request denied"));
+        pendingIncomingCall.close();
+        pendingIncomingCall = null;
+    }
+
+    function terminateActiveCall(){
+        logSystemMessage("terminate media connection.. ");
+
+        if(activeCallObject){
+            activeCallObject.close();
+            activeCallObject = null;
+        }
+
+        if(localStream){
+            localStream.getTracks().forEach(track => track.stop());
+            localStream =null;
+        }
+
+        document.getElementById("localVideo").srcObject = null;
+        document.getElementById("remoteVideo").srcObject = null;
+
+        document.getElementById("videoArea").classList.remove("active");
+        document.getElementById("callControls").style.display = "none"
+    }
+    function openModal(modalId){
+        document.getElementById(modalId).style.display = "flex";
+    }
+    function closeModal(modalId){
+        document.getElementById(modalId).style.display = "none";
+    }
+    function cleanUpMediaStates(){
+        if(localStream){
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+        document.getElementById("localVideo").srcObject = null;
+        document.getElementById("remoteVideo").srcObject = null;
+
+        document.getElementById("videoArea").classList.remove("active");
+        document.getElementById("callControls").style.display = "none";
+
+        activeCallObject = null;
     }
 </script>
 </body>
